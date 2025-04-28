@@ -20,11 +20,17 @@ class _AdminScreenState extends State<AdminScreen> {
   final AuthService _authService = AuthService();
   final TextEditingController _announcementController = TextEditingController();
   final TextEditingController _zoneController = TextEditingController();
+  final TextEditingController _timerMinutesController = TextEditingController(text: "3"); // Default 3 minutes
   
   List<Player> _players = [];
   String _selectedZone = 'FLOOR 2';
   bool _isLoading = true;
   StreamSubscription? _playersSubscription;
+  
+  // Timer related properties
+  Timer? _redirectTimer;
+  int _timerCountdown = 0;
+  bool _timerActive = false;
 
   @override
   void initState() {
@@ -125,6 +131,54 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  // New method to start the redirection timer
+  void _startRedirectTimer() {
+    // Cancel any existing timer
+    _redirectTimer?.cancel();
+    
+    // Parse minutes from input field
+    final minutes = int.tryParse(_timerMinutesController.text) ?? 3;
+    _timerCountdown = minutes * 60; // Convert to seconds
+    
+    setState(() {
+      _timerActive = true;
+    });
+    
+    // Start a new timer
+    _redirectTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        if (_timerCountdown > 0) {
+          _timerCountdown--;
+        } else {
+          _timerActive = false;
+          _redirectTimer?.cancel();
+          _redirectAllUsers(); // Redirect all users when timer reaches zero
+        }
+      });
+    });
+    
+    // Send announcement about the timer
+    _firestoreService.sendAdminMessage(
+      'ZONE CHANGE IMMINENT: Moving to $_selectedZone in $minutes minutes!'
+    );
+  }
+  
+  // Format time as mm:ss
+  String _formatTime() {
+    final minutes = (_timerCountdown / 60).floor();
+    final seconds = _timerCountdown % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+  
+  // Cancel the active timer
+  void _cancelTimer() {
+    _redirectTimer?.cancel();
+    setState(() {
+      _timerActive = false;
+    });
+    _firestoreService.sendAdminMessage('Zone change canceled');
+  }
+
   Future<void> _redirectAllUsers() async {
     try {
       // Create a field in Firestore for all clients to listen to
@@ -155,7 +209,9 @@ class _AdminScreenState extends State<AdminScreen> {
   void dispose() {
     _announcementController.dispose();
     _zoneController.dispose();
+    _timerMinutesController.dispose();
     _playersSubscription?.cancel();
+    _redirectTimer?.cancel();
     _authService.clearAdminStatus();
     super.dispose();
   }
@@ -352,23 +408,94 @@ class _AdminScreenState extends State<AdminScreen> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  ElevatedButton(
-                    onPressed: _redirectAllUsers,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF36567),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 16,
-                        horizontal: 16,
+                  if (!_timerActive)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: _timerMinutesController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Minutes',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 3,
+                                child: ElevatedButton(
+                                  onPressed: _startRedirectTimer,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFF36567),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'START TIMER',
+                                    style: TextStyle(
+                                      fontFamily: 'Bungee',
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _redirectAllUsers,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFF36567),
+                              minimumSize: const Size.fromHeight(40),
+                            ),
+                            child: const Text(
+                              'FORCE REDIRECT NOW',
+                              style: TextStyle(
+                                fontFamily: 'Bungee',
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            'REDIRECTING IN: ${_formatTime()}',
+                            style: const TextStyle(
+                              fontFamily: 'Bungee',
+                              fontSize: 18,
+                              color: Color(0xFFF36567),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _cancelTimer,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey,
+                              minimumSize: const Size.fromHeight(40),
+                            ),
+                            child: const Text(
+                              'CANCEL',
+                              style: TextStyle(
+                                fontFamily: 'Bungee',
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: const Text(
-                      'REDIRECT ALL',
-                      style: TextStyle(
-                        fontFamily: 'Bungee',
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ],

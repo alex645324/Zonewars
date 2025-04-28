@@ -16,9 +16,39 @@ class AuthService {
   /// Holds the current player's ID
   String? currentPlayerId;
 
+  // Add these new properties at the top with other properties
+  bool _isAdmin = false;
+  final String _adminPassword = const String.fromEnvironment(
+    'ADMIN_PASSWORD',
+    defaultValue: 'admin123'
+  ); // TODO: Replace with secure authentication
+
+  // Add getter for admin status
+  bool get isAdmin => _isAdmin;
+
+  // Add this new method
+  Future<bool> authenticateAdmin(String password) async {
+    try {
+      _isAdmin = password == _adminPassword;
+      return _isAdmin;
+    } catch (e) {
+      print('Error authenticating admin: $e');
+      return false;
+    }
+  }
+
+  // Add method to clear admin status
+  void clearAdminStatus() {
+    _isAdmin = false;
+  }
+
   /// Sign in the player by creating a new document in Firestore
   Future<void> signInPlayer(String nickname) async {
     try {
+      if (nickname.length > 10) {
+        throw Exception('Nickname too long');
+      }
+
       String playerId = _uuid.v4();
       print('Generated playerId: $playerId');
 

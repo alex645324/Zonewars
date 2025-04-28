@@ -4,14 +4,15 @@ import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'code_floor_screen.dart';
 import '../services/auth_service.dart';
-import '../models/player_model.dart';  // Add this import
+import '../services/firestore_service.dart'; // Add this import
+import '../models/player_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String currentPlayerName;
-  
+
   const DashboardScreen({
-    Key? key, 
+    Key? key,
     required this.currentPlayerName,
   }) : super(key: key);
 
@@ -22,15 +23,33 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final AuthService _authService = AuthService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirestoreService _firestoreService = FirestoreService(); // Add this line
   Timer? _navigationTimer;
   late List<Player> players = []; // Initialize with empty list
   StreamSubscription? _playerSubscription;
+  bool _showAdminMessage = false;
+  String _adminMessage = '';
+  StreamSubscription? _adminMessageSubscription;
+  StreamSubscription? _redirectSubscription;
 
   @override
   void initState() {
     super.initState();
+    _setupAdminMessageListener();
     _setupPlayerListener();
+    _setupRedirectListener();
     _startNavigationTimer();
+  }
+
+  void _setupAdminMessageListener() {
+    _adminMessageSubscription = _firestoreService.adminMessageStream().listen((message) {
+      if (message.isNotEmpty) {
+        setState(() {
+          _adminMessage = message;
+          _showAdminMessage = true;
+        });
+      }
+    });
   }
 
   void _setupPlayerListener() {
@@ -38,11 +57,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     print('Dashboard - Current Player ID: $playerId'); // Debug log
 
     if (playerId != null) {
-      _playerSubscription = _firestore
-          .collection('players')
-          .doc(playerId)
-          .snapshots()
-          .listen((snapshot) {
+      _playerSubscription = _firestore.collection('players').doc(playerId).snapshots().listen((snapshot) {
         if (snapshot.exists) {
           final playerData = snapshot.data()!;
           setState(() {
@@ -70,6 +85,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ];
       });
     }
+  }
+
+  void _setupRedirectListener() {
+    _redirectSubscription = _firestore.collection('game_state').doc('redirect').snapshots().listen((snapshot) {
+      if (snapshot.exists && snapshot.data()?['shouldRedirect'] == true) {
+        final String floorName = snapshot.data()?['floorName'] ?? 'FLOOR 2';
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => FloorCodeScreen(
+                currentPlayerName: widget.currentPlayerName,
+                floorName: floorName,
+                validCodes: _firestoreService.getValidCodesForFloor(floorName),
+              ),
+            ),
+          );
+        }
+      }
+    });
   }
 
   void _startNavigationTimer() {
@@ -106,10 +140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (currentPlayer.lives > 0) {
       try {
         final newLives = currentPlayer.lives - 1;
-        await _firestore
-            .collection('players')
-            .doc(playerId) // Use the checked playerId
-            .update({
+        await _firestore.collection('players').doc(playerId).update({
           'eliminationCount': 3 - newLives,
         });
 
@@ -130,7 +161,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _showDisqualificationOverlay() {
     _authService.disqualifyPlayer();
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -151,8 +182,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _redirectSubscription?.cancel();
     _navigationTimer?.cancel();
     _playerSubscription?.cancel();
+    _adminMessageSubscription?.cancel();
     super.dispose();
   }
 
@@ -160,102 +193,117 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            children: [
-              const Text(
-                'DASHBOARD',
-                style: TextStyle(
-                  fontFamily: 'Bungee',
-                  fontSize: 50,
-                  fontWeight: FontWeight.w400,
-                  color: Color(0xFF50AFD5),
-                  letterSpacing: 2,
-                ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                children: [
+                  const Text(
+                    'DASHBOARD',
+                    style: TextStyle(
+                      fontFamily: 'Bungee',
+                      fontSize: 50,
+                      fontWeight: FontWeight.w400,
+                      color: Color(0xFF50AFD5),
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'WHEN YOU GET HIT PRESS THE "I GOT HIT" BUTTON IT\'S NOT THAT HARD',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'Bungee',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w400,
+                      color: Color(0xFF50AFD5),
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: players.length,
+                      itemBuilder: (context, index) {
+                        final player = players[index];
+                        return PlayerListItem(
+                          player: player,
+                          onGotHit: player.isCurrentPlayer && !player.isSpectator
+                              ? _handleGotHit
+                              : null,
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              const Text(
-                'WHEN YOU GET HIT PRESS THE "I GOT HIT" BUTTON IT\'S NOT THAT HARD',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: 'Bungee',
-                  fontSize: 10,
-                  fontWeight: FontWeight.w400,
-                  color: Color(0xFF50AFD5),
-                  letterSpacing: 0.4,
-                ),
-              ),
-              const SizedBox(height: 30),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: players.length,
-                  itemBuilder: (context, index) {
-                    final player = players[index];
-                    return PlayerListItem(
-                      player: player,
-                      onGotHit: player.isCurrentPlayer && !player.isSpectator 
-                        ? _handleGotHit 
-                        : null,
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class DisqualificationOverlay extends StatelessWidget {
-  final VoidCallback onSpectatorMode;
-
-  const DisqualificationOverlay({
-    Key? key,
-    required this.onSpectatorMode,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-      child: Container(
-        color: Colors.black.withOpacity(0.5),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text(
-                'DISQUALIFIED',
-                style: TextStyle(
-                  fontFamily: 'Bungee',
-                  fontSize: 50,
-                  color: Color(0xFFF36567),
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: onSpectatorMode,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF50AFD5),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 30,
-                    vertical: 15,
+            ),
+            if (_showAdminMessage)
+              Positioned(
+                top: MediaQuery.of(context).padding.top,
+                left: 10,
+                right: 10,
+                child: Material(
+                  elevation: 8,
+                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFFF36567),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'ANNOUNCEMENT',
+                          style: TextStyle(
+                            fontFamily: 'Bungee',
+                            fontSize: 18,
+                            color: Colors.white,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _adminMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Bungee',
+                            fontSize: 14,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _showAdminMessage = false;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'DISMISS',
+                              style: TextStyle(
+                                fontFamily: 'Bungee',
+                                fontSize: 12,
+                                color: Color(0xFFF36567),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                child: const Text(
-                  'ENTER SPECTATOR MODE',
-                  style: TextStyle(
-                    fontFamily: 'Bungee',
-                    fontSize: 16,
-                  ),
-                ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -314,9 +362,9 @@ class PlayerListItem extends StatelessWidget {
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2.0),
                   child: Image.asset(
-                    index < player.lives 
-                      ? 'lib/assets/heart.png'
-                      : 'lib/assets/Xbutton.png',
+                    index < player.lives
+                        ? 'lib/assets/heart.png'
+                        : 'lib/assets/Xbutton.png',
                     width: 24,
                     height: 24,
                   ),
@@ -332,6 +380,66 @@ class PlayerListItem extends StatelessWidget {
                   height: 100,
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DisqualificationOverlay extends StatelessWidget {
+  final VoidCallback onSpectatorMode;
+
+  const DisqualificationOverlay({
+    Key? key,
+    required this.onSpectatorMode,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withOpacity(0.8),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'DISQUALIFIED',
+              style: TextStyle(
+                fontFamily: 'Bungee',
+                fontSize: 40,
+                color: Color(0xFFF36567),
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'You have been eliminated from the game',
+              style: TextStyle(
+                fontFamily: 'Bungee',
+                fontSize: 16,
+                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: onSpectatorMode,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF50AFD5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 40,
+                  vertical: 15,
+                ),
+              ),
+              child: const Text(
+                'ENTER SPECTATOR MODE',
+                style: TextStyle(
+                  fontFamily: 'Bungee',
+                  fontSize: 16,
+                ),
+              ),
+            ),
           ],
         ),
       ),

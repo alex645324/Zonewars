@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async'; // Add this import for Timer
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'services/auth_service.dart';
@@ -26,8 +27,75 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  Timer? _disqualificationTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start the disqualification check timer
+    _startDisqualificationTimer();
+  }
+
+  void _startDisqualificationTimer() {
+    _disqualificationTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      final now = DateTime.now();
+      print('Running disqualification check at ${now.toString()}');
+      
+      FirebaseFirestore.instance
+          .collection('players')
+          .where('isSpectator', isEqualTo: false)
+          .where('codeEntered', isEqualTo: false)
+          .get()
+          .then((snapshot) {
+            print('Found ${snapshot.docs.length} players who have not entered code');
+            
+            for (final doc in snapshot.docs) {
+              final deadline = doc.data()['codeEntryDeadline'] as Timestamp?;
+              final playerName = doc.data()['name'] as String? ?? 'Unknown';
+              
+              if (deadline != null) {
+                print('Player $playerName deadline: ${deadline.toDate().toString()}');
+                print('Current time: ${now.toString()}');
+                
+                if (now.isAfter(deadline.toDate())) {
+                  print('DISQUALIFYING player ${doc.id} - $playerName - deadline passed');
+                  
+                  // Use a direct document reference to ensure update happens
+                  FirebaseFirestore.instance
+                      .collection('players')
+                      .doc(doc.id)
+                      .update({
+                        'isActive': false,
+                        'isSpectator': true,
+                        'eliminationCount': 3,
+                      })
+                      .then((_) => print('Successfully disqualified $playerName'))
+                      .catchError((e) => print('Error disqualifying $playerName: $e'));
+                }
+              } else {
+                print('Player $playerName has no deadline set');
+              }
+            }
+          })
+          .catchError((error) {
+            print('Error in disqualification check: $error');
+          });
+    });
+  }
+
+  @override
+  void dispose() {
+    _disqualificationTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

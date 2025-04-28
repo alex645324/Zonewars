@@ -55,75 +55,121 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _setupPlayerListener() {
-    final playerId = _authService.currentPlayerId;
-    print('Dashboard - Current Player ID: $playerId'); // Debug log
+  final playerId = _authService.currentPlayerId;
+  print('Dashboard - Current Player ID: $playerId'); // Debug log
 
-    if (playerId != null) {
-      _playerSubscription = _firestore
-          .collection('players')
-          .doc(playerId)
-          .snapshots()
-          .listen((snapshot) {
-        if (snapshot.exists) {
-          final playerData = snapshot.data()!;
+  // Listen to all players instead of just the current player
+  _playerSubscription = _firestore
+      .collection('players')
+      .snapshots()
+      .listen((snapshot) {
+        if (snapshot.docs.isNotEmpty) {
+          // Convert all docs to Player objects
+          List<Player> allPlayers = [];
+          
+          for (var doc in snapshot.docs) {
+            // Generate a stable "random" avatar for each player based on their ID
+            final avatarNum = (doc.id.hashCode % 6) + 1; // 1-6 range
+            final avatarPath = 'lib/assets/avatar$avatarNum.png';
+            
+            // Create player using the existing fromMap method
+            Player player = Player.fromMap(
+              doc.data(),
+              id: doc.id,
+              currentPlayerId: playerId ?? 'local',
+            );
+            
+            // Manually set the avatar path after creation
+            player = Player(
+              id: player.id,
+              name: player.name,
+              avatarAsset: avatarPath,
+              lives: player.lives,
+              isCurrentPlayer: player.isCurrentPlayer,
+              isSpectator: player.isSpectator,
+            );
+            
+            allPlayers.add(player);
+          }
+          
+          // Sort the players with complex logic:
+          // 1. Active players first, then disqualified
+          // 2. Current player is first among active players
+          // 3. Current player is first among disqualified if they're disqualified
+          allPlayers.sort((a, b) {
+            // First compare active/spectator status
+            if (!a.isSpectator && b.isSpectator) return -1;
+            if (a.isSpectator && !b.isSpectator) return 1;
+            
+            // If both are in same category (active or spectator)
+            // and one is current player, current player gets priority
+            if (a.isCurrentPlayer) return -1;
+            if (b.isCurrentPlayer) return 1;
+            
+            // For players in the same category who aren't the current player,
+            // sort alphabetically
+            return a.name.compareTo(b.name);
+          });
+          
+          setState(() {
+            players = allPlayers;
+          });
+        } else if (playerId == null) {
+          // Fallback for when there are no players in the database
+          print('Warning: No players found, using local fallback'); // Debug log
           setState(() {
             players = [
-              Player.fromMap(
-                playerData,
-                id: playerId,
-                currentPlayerId: playerId,
+              Player(
+                id: 'local',
+                name: widget.currentPlayerName,
+                avatarAsset: 'lib/assets/avatar1.png',
+                lives: 3,
+                isCurrentPlayer: true,
               ),
             ];
           });
         }
       });
-    } else {
-      print('Warning: No player ID found, using local fallback'); // Debug log
-      setState(() {
-        players = [
-          Player(
-            id: 'local',
-            name: widget.currentPlayerName,
-            avatarAsset: 'lib/assets/avatar1.png',
-            lives: 3,
-            isCurrentPlayer: true,
-          ),
-        ];
-      });
-    }
-  }
+}
 
   void _setupRedirectListener() {
-    _redirectSubscription = _firestore
-        .collection('game_state')
-        .doc('redirect')
-        .snapshots()
-        .listen((snapshot) {
-      if (snapshot.exists && snapshot.data()?['shouldRedirect'] == true) {
-        // Check timestamp to avoid processing old redirects
-        final timestamp = snapshot.data()?['timestamp'] as Timestamp?;
-        final now = Timestamp.now();
-        
-        // Only process redirects that are less than 10 seconds old
-        if (timestamp != null && 
-            now.seconds - timestamp.seconds < 10) {
-            
-          final String floorName = snapshot.data()?['floorName'] ?? 'FLOOR 2';
-          if (mounted) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (context) => FloorCodeScreen(
-                  currentPlayerName: widget.currentPlayerName,
-                  floorName: floorName,
-                  validCodes: _firestoreService.getValidCodesForFloor(floorName),
-                ),
-              ),
-            );
-          }
+  _redirectSubscription = _firestore
+      .collection('game_state')
+      .doc('redirect')
+      .snapshots()
+      .listen((snapshot) async {
+    if (snapshot.exists && snapshot.data()?['shouldRedirect'] == true) {
+      final timestamp = snapshot.data()?['timestamp'] as Timestamp?;
+      final now = Timestamp.now();
+      if (timestamp != null && now.seconds - timestamp.seconds < 10) {
+        final floorName = snapshot.data()?['floorName'] as String? ?? 'FLOOR 2';
+        if (!mounted) return;
+
+        // 1) clear the flag so it won't retrigger
+        try {
+          await _firestore
+              .collection('game_state')
+              .doc('redirect')
+              .update({'shouldRedirect': false});
+        } catch (e) {
+          print('Couldn’t clear redirect flag: $e');
         }
+
+        // 2) navigate to the code‐entry screen
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => FloorCodeScreen(
+              currentPlayerName: widget.currentPlayerName,
+              floorName: floorName,
+              validCodes: _firestoreService.getValidCodesForFloor(floorName),
+            ),
+          ),
+        );
       }
-    });
-  }
+    }
+  });
+}
+
 
   void _handleGotHit() async {
     final playerId = _authService.currentPlayerId;

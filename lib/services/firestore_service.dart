@@ -26,6 +26,20 @@ class FirestoreService {
     });
   }
 
+  /// Mark that a player has successfully entered a code
+  Future<void> markCodeAsEntered(String playerId) async {
+    try {
+      await _db.collection('players').doc(playerId).update({
+        'codeEntered': true
+      });
+      print('Player $playerId marked as having entered code');
+    } catch (e) {
+      print('Error marking code as entered: $e');
+      rethrow;
+    }
+  }
+
+
   /// Stream of the current admin message for real-time alerts.
   Stream<String> adminMessageStream() {
     return _db.collection('game_state').doc('admin_message').snapshots().map(

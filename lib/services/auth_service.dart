@@ -106,7 +106,18 @@ class AuthService {
       rethrow;
     }
   }
-
+  /// Mark that a player has successfully entered a code
+Future<void> markCodeAsEntered(String playerId) async {
+  try {
+    await _firestore.collection('players').doc(playerId).update({
+      'codeEntered': true
+    });
+    print('Player $playerId marked as having entered code');
+  } catch (e) {
+    print('Error marking code as entered: $e');
+    rethrow;
+  }
+}
   /// Mark the player as eliminated
   Future<void> eliminateCurrentPlayer() async {
     if (currentPlayerId == null) {

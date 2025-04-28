@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:ui';
 import '../services/auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dashboard_screen.dart' show DashboardScreen, DisqualificationOverlay;
 
 class FloorCodeScreen extends StatefulWidget {
@@ -89,19 +90,27 @@ class _FloorCodeScreenState extends State<FloorCodeScreen> {
   }
 
   void _handleCodeSubmission(String code) async {
-    final submittedCode = code.trim().toUpperCase();
-    if (submittedCode.isNotEmpty) {
-      try {
-        if (widget.validCodes.contains(submittedCode)) {
-          // Cancel timer first
-          _timer?.cancel();
-          
-          // Update player's zone code
-          await _authService.updatePlayerZoneCode(submittedCode);
-          
-          if (!mounted) return; // Check mounted state before UI updates
-          
-          // Show success message
+  final submittedCode = code.trim().toUpperCase();
+  if (submittedCode.isNotEmpty) {
+    try {
+      if (widget.validCodes.contains(submittedCode)) {
+        // Get player ID
+        final playerId = _authService.currentPlayerId;
+        
+        // Valid code entered
+        await _authService.updatePlayerZoneCode(submittedCode);
+        
+        // Mark that code was entered successfully to prevent disqualification
+        if (playerId != null) {
+          // Since markCodeAsEntered might not be available yet, use direct Firestore update
+          await FirebaseFirestore.instance.collection('players').doc(playerId).update({
+            'codeEntered': true
+          });
+        }
+        
+        _timer?.cancel();
+        
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Code accepted!'),
@@ -109,7 +118,6 @@ class _FloorCodeScreenState extends State<FloorCodeScreen> {
             ),
           );
           
-          // Navigate back to dashboard AFTER the code is updated
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (context) => DashboardScreen(
@@ -117,27 +125,28 @@ class _FloorCodeScreenState extends State<FloorCodeScreen> {
               ),
             ),
           );
-        } else {
-          // Invalid code entered
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Wrong code! The code is near the elevator.'),
-              backgroundColor: Color(0xFFF36567),
-            ),
-          );
         }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Error submitting code'),
-              backgroundColor: Color(0xFFF36567),
-            ),
-          );
-        }
+      } else {
+        // Invalid code entered
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Wrong code! The code is near the elevator.'),
+            backgroundColor: Color(0xFFF36567),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error submitting code'),
+            backgroundColor: Color(0xFFF36567),
+          ),
+        );
       }
     }
   }
+}
 
   @override
   void dispose() {

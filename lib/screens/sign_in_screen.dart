@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'dashboard_screen.dart';
+import 'lobby_screen.dart';
 import 'package:flutter/services.dart';
 import '../services/auth_service.dart';
+import '../services/game_state_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -13,6 +14,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final AuthService _authService = AuthService();
+  final GameStateService _gameStateService = GameStateService();
 
   @override
   void dispose() {
@@ -27,10 +29,15 @@ class _LoginScreenState extends State<LoginScreen> {
         await _authService.signInPlayer(username);
 
         if (mounted) {
-          // Navigate directly to dashboard
+          // Get current game state to determine where to navigate
+          final gameState = await _gameStateService.getCurrentGameState();
+          final status = gameState['status'] as String? ?? GameStateService.LOBBY;
+          
+          // Always navigate to lobby initially - the lobby will handle further navigation
+          // based on the current game state
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => DashboardScreen(
+              builder: (context) => LobbyScreen(
                 currentPlayerName: username,
               ),
             ),

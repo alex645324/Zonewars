@@ -24,7 +24,7 @@ class FloorCodeScreen extends StatefulWidget {
 class _FloorCodeScreenState extends State<FloorCodeScreen> {
   final TextEditingController _codeController = TextEditingController();
   final AuthService _authService = AuthService();
-  int _countdown = 180; // 3 minutes
+  int _countdown = 50; // 3 minutes
   Timer? _timer;
 
   @override

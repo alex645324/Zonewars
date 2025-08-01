@@ -2,7 +2,7 @@
 # WaterWars
 
 A personal, built-for-fun multiplayer water balloon fight game.  
-We got **30 players** into real games before campus RAs shut it down — still proud of how real it felt.
+We got **30 players** into real games before campus RAs shut it down — still proud of it lol.
 
 ## Problem
 
